@@ -1,0 +1,48 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: recsys
+      POSTGRES_USER: recadmin
+      POSTGRES_PASSWORD: recadmin
+    ports: ["5433:5432"]
+    volumes:
+      - ./init-db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recadmin"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6380:6379"]
+
+  training:
+    build:
+      context: .
+      dockerfile: training/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://recadmin:recadmin@postgres:5432/recsys
+    # One-shot job: trains the model and writes recommendations, then exits.
+    # Re-run with `docker compose run training` whenever you want to retrain.
+
+  serving-api:
+    build: ./serving-api
+    depends_on: [postgres, redis]
+    environment:
+      DATABASE_URL: postgresql://recadmin:recadmin@postgres:5432/recsys
+      REDIS_URL: redis://redis:6379
+    ports: ["5000:5000"]
+
+  dashboard:
+    build: ./dashboard
+    depends_on: [serving-api]
+    environment:
+      REACT_APP_SERVING_API: http://localhost:5000
+    ports: ["3003:80"]
